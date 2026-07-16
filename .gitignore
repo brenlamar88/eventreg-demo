@@ -8,3 +8,8 @@ dist/
 /out/
 next-env.d.ts
 *.tsbuildinfo
+
+# Env files (keep .env.example)
+.env
+.env.local
+.env*.local

@@ -620,3 +620,79 @@ dropped.
 - Badge ZPL bytes arrive intact at a real TCP:9100 listener; ZPL injection via
   display names is escaped.
 - New tables covered by the self-extending cross-org isolation test.
+
+---
+
+## 16. Phase 6 — Supabase Auth + JWT-native tenancy
+
+Until now the tenant context (`app.current_org`) was a session GUC a trusted
+server set. Phase 6 makes it real auth on Supabase — operators' staff log in —
+without breaking the GUC model the tests and local dev rely on.
+
+### 16.1 `current_org()` resolves from three sources, in order
+
+```
+current_org() =
+  1. app.current_org GUC          -- explicit; tests + server-derived context
+  2. request.jwt.claims ->> org_id -- a Supabase Auth JWT with an org claim
+  3. membership by auth.uid()      -- the signed-in user's org (single-org case)
+```
+
+The GUC keeps top priority, so **every existing test and the local demo are
+unaffected** — they set the GUC and never reach the JWT path. On Supabase, a
+request through PostgREST as the `authenticated` role has no GUC, so resolution
+falls through to the JWT claim, then to the user's `membership` row. The same
+RLS policies (`org_id = current_org()`) now work for both the `app_user` role
+(direct/server) and `authenticated` (PostgREST/client) with no per-table rew\
+rite.
+
+### 16.2 Membership is the user↔operator mapping
+
+```
+membership (user_id -> auth.users, org_id -> org, role, primary key(user_id,org_id))
+```
+
+A user belongs to one or more operator orgs. RLS lets a user read only their own
+memberships (`user_id = auth.uid()`). Server-side resolution can't be the user
+(no JWT on a `pg` connection), so `resolve_user_org(user_id)` is a
+`SECURITY DEFINER` function the server calls with the *verified* session user id
+to look up their org — org is derived from the trusted session, never from
+client input.
+
+### 16.3 Supabase compatibility shim, idempotent and non-destructive
+
+The same migrations run on the local test cluster (plain Postgres) and on
+Supabase. `0016` creates — only if absent — the `authenticated`/`anon` roles,
+the `auth` schema, and stub `auth.uid()`/`auth.jwt()`/`auth.users`, so the
+schema references resolve locally. On Supabase these already exist and are left
+untouched (`if not exists` / `pg_proc` guards). Grants mirror `app_user` onto
+`authenticated` so PostgREST/client access works there.
+
+### 16.4 App: Supabase Auth for identity, session-derived org for tenancy
+
+The console uses `@supabase/ssr` for login/session. The data layer keeps the
+`pg` + GUC design but replaces the URL-supplied `orgId` with one derived
+server-side from the verified session (`withUser` → `resolve_user_org` → set
+`app.current_org`). Tenancy can no longer be spoofed by editing a URL. When
+Supabase env vars are absent (local dev / demo), the app falls back to the
+existing org-picker so it still runs with zero setup.
+
+### 16.5 What still needs the real Supabase project
+
+Login end-to-end (GoTrue), the access-token hook that injects `org_id` into the
+JWT for multi-org users, and seeding the first `membership` row for an operator
+admin. The DB-level behavior (JWT resolution, membership isolation) is proven
+locally against the `authenticated` role with a simulated `request.jwt.claims`;
+the app auth wiring builds and is documented but requires the Supabase env to
+exercise. **Assumption A6**: one active org per session; multi-org users select
+an active org (JWT hook / GUC) — deferred.
+
+### 16.6 Phase 6 definition of done (executable)
+
+- As `authenticated` with `request.jwt.claims.org_id = A`, a query sees only
+  org A's rows and can write only A (RLS via JWT), on every tenant table.
+- With no GUC and no JWT org claim, `current_org()` resolves to the signed-in
+  user's org via `membership` / `auth.uid()`.
+- The `app.current_org` GUC still wins when set (all prior tests stay green).
+- `resolve_user_org(user_id)` returns the user's org for server-side context.
+- Cross-org isolation holds under the JWT path, not just the GUC path.

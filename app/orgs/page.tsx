@@ -1,11 +1,16 @@
+import { redirect } from 'next/navigation';
 import { listOrgs } from '../lib/queries';
 import { usd } from '../lib/format';
 import { createOrgAction, seedDemoAction } from '../lib/actions';
+import { supabaseConfigured } from '../lib/supabase/env';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export default async function OrgsPage() {
+  // The cross-tenant platform list is open-mode only. With auth on, operators
+  // are scoped to their own org (root redirects them there).
+  if (supabaseConfigured()) redirect('/');
   const orgs = await listOrgs();
 
   return (

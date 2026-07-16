@@ -2,11 +2,13 @@ import { notFound } from 'next/navigation';
 import { getOrg, orgRealizedFee, listEvents } from '../../lib/queries';
 import { usd } from '../../lib/format';
 import { createEventAction } from '../../lib/actions';
+import { assertMember } from '../../lib/auth';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export default async function OrgDashboard({ params }: { params: { orgId: string } }) {
+  await assertMember(params.orgId); // no-op in open mode; enforces membership with auth on
   const org = await getOrg(params.orgId);
   if (!org) notFound();
   const [fee, events] = await Promise.all([
