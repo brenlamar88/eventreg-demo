@@ -1,0 +1,21 @@
+{
+  "name": "v8-event-platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "V8 Event Platform — party/role/ledger core for consignment-auction fundraisers",
+  "scripts": {
+    "db:start": "bash scripts/start-test-db.sh",
+    "db:stop": "bash scripts/stop-test-db.sh",
+    "db:migrate": "node --experimental-strip-types scripts/migrate.ts",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.10",
+    "fast-check": "^3.23.1",
+    "pg": "^8.13.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

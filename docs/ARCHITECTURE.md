@@ -133,8 +133,8 @@ ledger_entry
   party_id        uuid not null references party(id)   -- the obligor (§3.3)
   role            enum(... §5)                          -- role money moved under
   entry_type      enum('hammer','buyers_premium','sellers_commission',
-                       'sponsorship','donation','payment','payout',
-                       'reversal', ...)
+                       'sponsorship','donation','payment','payout')
+                       -- no 'reversal': a reversal inherits the type it reverses (§4.3)
   amount_cents    bigint not null      -- INTEGER cents; signed; never float
   currency        text not null default 'usd'
   idempotency_key text not null
@@ -163,7 +163,8 @@ enforces uniqueness. Grain = **one key per external occurrence that can retry:**
 
 - Stripe webhook → the Stripe `event.id`.
 - A bid synced from the venue hub → `bid:{device_id}:{device_seq}` (§8).
-- A lot award → `award:{event_id}:{lot_id}:{award_seq}`.
+- A lot award → `award:{lot_id}:{buyer|consignor}:{hammer|premium|commission}`
+  (lot_id is a uuid, so one award posts four deterministically-keyed rows).
 - An operator manual entry → `manual:{uuid-minted-once-in-the-UI}`.
 
 The producer owns key construction; the constraint is the backstop. Two
@@ -172,12 +173,14 @@ namespaced by `source` prefix as above.
 
 ### 4.3 Corrections are reversing entries (money rule 2)
 
-A correction inserts a new row with `entry_type='reversal'`, `reverses_id`
-pointing at the original, and `amount_cents` = the exact negation of the
-original. The reversal is itself idempotent: its key is derived,
-`reverse:{original_idempotency_key}`, so a retried correction cannot
-double-reverse. Net of any entry and its reversal is provably zero — this is a
-property test, not an example (§9).
+A correction inserts a new row that **inherits the original's `entry_type` and
+`role`**, sets `reverses_id` to the original, and stores `amount_cents` = the
+exact negation. (There is deliberately **no** `'reversal'` `entry_type`:
+inheriting the type/role means every type- or role-scoped projection in §7 nets
+automatically, with no special-casing of reversals.) The reversal is itself
+idempotent: its key is derived, `reverse:{original_idempotency_key}`, so a
+retried correction cannot double-reverse. Net of any entry and its reversal is
+provably zero — a property test, not an example (§9).
 
 ### 4.4 Why raffles need *nothing* here (you asked)
 
@@ -334,13 +337,12 @@ Phase 1:
 
 ## 11. Open questions & assumptions (please rule on these)
 
-| id | type | needs your call |
+| id | type | resolution |
 |----|------|-----------------|
-| O1 | open | Is there a real `eventreg` instance to backfill as org #1, or is org #1 just the first-created org? |
-| A1 | assumption | Role enum closed at the six listed — any real operator already needing a seventh? |
-| A2 | assumption | Rate table designed for flat + tiered + per-consignor override — keep general, or is your operator strictly flat? |
-| A3 | assumption | Per-lot rounding = half-up (auction default). Confirm before it's baked into property tests. |
+| O1 | RESOLVED | **Build from scratch.** `eventreg` lives in another repo and is not migrated. Org #1 is simply the first org created by the same path as any other org — no backfill. Product goal is to sell to multiple operators, so the create-org path *is* the product, not a one-off. |
+| A1 | RESOLVED | Role enum **closed at the six listed.** A seventh is a rare additive migration, never a per-operator fork. |
+| A2 | RESOLVED | Rate table **kept general** (flat + tiered + per-consignor override). Multi-operator resale requires it; the values are operator-editable config. |
+| A3 | RESOLVED | Per-lot rounding = **half-up** (auction default), baked into the settlement property tests. |
 
-**Stopping here for your review, per the mission.** On your sign-off (and
-answers to O1/A1/A2/A3) I proceed to Phase 1: tests first, then the schema +
-RLS to satisfy them.
+Signed off to proceed to **Phase 1** (party model + ledger + multi-tenancy),
+tests first, then the schema + RLS to satisfy them.
