@@ -1,5 +1,5 @@
 -- V8 Event Platform — complete schema setup
--- Generated from supabase/migrations/0001..0016 (in order).
+-- Generated from supabase/migrations/0001..0017 (in order).
 -- HOW TO USE: Supabase Dashboard -> SQL Editor -> New query -> paste this
 -- entire file -> Run. Safe to run once on an empty database.
 
@@ -1260,7 +1260,15 @@ begin
   end if;
 end $$;
 
-create schema if not exists auth;
+-- The auth schema: exists on Supabase (owned by supabase_auth_admin, where even
+-- IF NOT EXISTS forms fail the ACL check before the existence check) — so test
+-- the catalog first and only create when genuinely absent (local cluster).
+do $$
+begin
+  if not exists (select 1 from pg_namespace where nspname = 'auth') then
+    create schema auth;
+  end if;
+end $$;
 
 -- auth.uid(): the current JWT subject. Supabase ships this; stub it locally.
 do $$
@@ -1292,15 +1300,27 @@ begin
   end if;
 end $$;
 
--- auth.users: Supabase's user table. Stub (id only) locally; untouched on Supabase.
-create table if not exists auth.users (id uuid primary key);
-
--- Local-stub environment only (no `supabase_admin` role): grant what Supabase
--- already grants on its auth schema, so `authenticated` can call auth.uid().
--- Skipped on Supabase (auth is already wired, and app_user isn't used there).
+-- auth.users: Supabase's user table. Stub (id only) locally; untouched on
+-- Supabase. Must be catalog-guarded: `create table if not exists auth.users`
+-- fails with "permission denied for schema auth" on Supabase because the ACL
+-- check runs before the existence check.
 do $$
 begin
-  if not exists (select 1 from pg_roles where rolname = 'supabase_admin') then
+  if to_regclass('auth.users') is null then
+    create table auth.users (id uuid primary key);
+  end if;
+end $$;
+
+-- Local-stub environment only: if WE own the auth schema (we just created the
+-- stub), wire the grants Supabase would normally provide, so `authenticated`
+-- can call auth.uid(). On Supabase the schema is owned by supabase_auth_admin
+-- (not us), so this is skipped and Supabase's own grants apply. Ownership is
+-- the correct detector — role-name checks are brittle across environments.
+do $$
+declare v_owner name;
+begin
+  select pg_get_userbyid(nspowner) into v_owner from pg_namespace where nspname = 'auth';
+  if v_owner = current_user then
     grant usage on schema auth to authenticated, anon, app_user;
     grant execute on function auth.uid() to authenticated, anon, app_user;
     grant execute on function auth.jwt() to authenticated, anon, app_user;
@@ -1438,3 +1458,41 @@ grant execute on all functions in schema public to authenticated;
 revoke execute on function create_org(text) from authenticated;
 revoke execute on function resolve_user_org(uuid) from authenticated;
 revoke execute on function add_member(uuid, uuid, text) from authenticated;
+
+-- ============================================================================
+-- supabase/migrations/0017_platform_rls.sql
+-- ============================================================================
+-- 0017_platform_rls.sql
+-- Platform-role access under FORCE RLS, portable to Supabase.
+--
+-- Locally the admin connection is a real superuser, which bypasses RLS. On
+-- Supabase the admin role (`postgres`) is NOT a superuser, and every tenant
+-- table here uses FORCE ROW LEVEL SECURITY — which applies even to the table
+-- owner. Consequence: SECURITY DEFINER platform functions (create_org,
+-- add_member, resolve_user_org) and the open-mode platform screens (listOrgs +
+-- v_platform_billing) fail with RLS violations, because they run with no
+-- tenant context by design.
+--
+-- Fix: grant the MIGRATION-RUNNING role (captured as current_user at DDL time —
+-- superuser postgres locally, non-superuser postgres on Supabase) an explicit
+-- platform policy on every RLS table. Tenant roles (app_user, authenticated)
+-- are untouched: policies are per-role, so their isolation policies remain the
+-- only ones that apply to them. Append-only guarantees are unaffected — the
+-- ledger/bid/outbox triggers reject UPDATE/DELETE regardless of role.
+
+do $$
+declare r record;
+begin
+  for r in
+    select c.relname
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public' and c.relkind = 'r' and c.relrowsecurity
+  loop
+    execute format('drop policy if exists %I on %I', r.relname || '_platform', r.relname);
+    execute format(
+      'create policy %I on %I as permissive for all to %I using (true) with check (true)',
+      r.relname || '_platform', r.relname, current_user
+    );
+  end loop;
+end $$;
