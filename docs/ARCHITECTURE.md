@@ -420,3 +420,72 @@ records payouts that occurred.
   arbitrary auctions + partial/over payments (property test).
 - `v_platform_billing.delta = 0` when application fees equal realized fees, and
   is detectably non-zero otherwise (property test).
+
+---
+
+## 13. Phase 3 — Fundraising (sponsorships, donations, consolidated receipts)
+
+The other half of the seam. Competitors do this half *or* consignor settlement,
+never both, because their sponsor/donor/buyer records are separate root
+entities. Here they are the same `party` writing to the same ledger, so the
+payoff is a **single consolidated tax receipt** spanning every role — the thing
+no split data model can produce.
+
+### 13.1 Contributions are ledger entries
+
+- `sponsorship` → ledger `role='sponsor'`, `entry_type='sponsorship'`. A
+  sponsorship carries a **benefit FMV** (fair market value of what the sponsor
+  gets back — table, logo, tickets).
+- `donation` → ledger `role='donor'`, `entry_type='donation'`. A pure gift; FMV
+  of benefits is zero (fully deductible).
+- Auction purchases already exist (Phase 1). A `lot` now carries `fmv_cents`
+  (retail value of the item), and awarding a lot writes a `lot_award` row
+  linking buyer→lot with the posted amounts.
+
+Sponsorships and donations are the operator's income but are **not** the
+platform's billing base: `v_operator_revenue` / `v_platform_billing` still count
+only `buyers_premium` + `sellers_commission`, so fundraising never inflates my
+invoice. (Property-tested.)
+
+### 13.2 The consolidated donor tax receipt (the differentiator)
+
+For U.S. charities the deductible amount of a **quid pro quo** contribution is
+`amount paid − FMV of goods/services received` (IRS Pub. 1771); pure gifts are
+fully deductible; contributions over **$75** with benefits require a written
+disclosure of the deductible portion.
+
+`v_tax_receipt_line` derives one line per contribution across all three sources,
+each with `gross_cents`, `fmv_cents`, and
+`deductible_cents = max(0, gross − fmv)` (floored **per line** — a bargain on one
+item cannot erase deductibility on another):
+
+| source | gross | fmv |
+|---|---|---|
+| sponsorship | committed amount | benefit FMV |
+| donation | gift amount | 0 |
+| auction | hammer + buyer's premium paid | lot FMV |
+
+`v_donor_tax_receipt` sums those lines **per party per event**, so one party who
+sponsored *and* bought lots *and* donated gets exactly one receipt row with the
+correct total deductible and a `requires_quid_pro_quo_disclosure` flag. This is
+the query no competitor can write.
+
+### 13.3 `lot_award`: a denormalization with a checked invariant
+
+`lot_award` stores the awarded amounts (hammer, premium, commission) alongside
+the buyer→lot link, so receipts can compute per-lot deductibility without
+key-parsing. The ledger remains the money source of truth; a **property test
+asserts `lot_award` amounts always equal the corresponding ledger entries**, so
+the denormalization can never silently drift. Assumption **A4**: an auction
+purchase's deductible portion = total paid (hammer + premium) − item FMV — the
+standard gala treatment; flag if your CPA wants premium excluded.
+
+### 13.4 Phase 3 definition of done (executable)
+
+- Receipt totals equal the per-line sum of `max(0, gross − fmv)` across arbitrary
+  mixes of sponsorships, donations, and auction wins (property test).
+- One party holding sponsor + buyer + donor roles at an event yields exactly one
+  `v_donor_tax_receipt` row consolidating all three (and three receipt lines).
+- `lot_award` amounts equal the ledger's award entries (property test).
+- Donations/sponsorships do not change `v_platform_billing` (billing base is
+  fees only).

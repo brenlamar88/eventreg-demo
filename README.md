@@ -51,6 +51,23 @@ audit. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §12.
 | Buyer/consignor balances reconcile; `record_payment` refuses an org with no Connect account | `test/stripe-ingest.property.test.ts` |
 | Application fee collected reconciles against realized ledger fee (billing base) | `test/stripe-ingest.property.test.ts` |
 
+## Phase 3 (this repo)
+
+The fundraising half of the seam: sponsorships (with benefit FMV), donations,
+and the **consolidated donor tax receipt** — one receipt per party spanning
+sponsor + buyer + donor roles, the query no competitor's split data model can
+write. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §13.
+
+- Fundraising + receipts schema: `supabase/migrations/0013_fundraising.sql`,
+  `0014_receipts.sql`
+
+| Requirement | Test |
+|---|---|
+| Deductible = Σ per-line `max(0, paid − FMV)` across sponsorship+donation+auction | `test/tax-receipt.property.test.ts` |
+| One party as sponsor+buyer+donor → a single consolidated receipt (3 lines) | `test/tax-receipt-consolidation.test.ts` |
+| Fundraising income never inflates the platform billing base (fees only) | `test/tax-receipt.property.test.ts` |
+| `lot_award` amounts never drift from the ledger | `test/lot-award-invariant.property.test.ts` |
+
 ## Running the tests
 
 Requires Node 22 and PostgreSQL 16.

@@ -4,6 +4,7 @@ import { admin, createOrg, orgClient, closeAll } from './helpers/db.ts';
 import { makeAuction, postAward } from './helpers/seed.ts';
 import { connectStripe, paymentIntentSucceeded } from './helpers/stripe.ts';
 import { ingestEvent } from '../src/stripe/ingest.ts';
+import { recordSponsorship, recordDonation } from './helpers/fundraising.ts';
 
 afterAll(closeAll);
 
@@ -50,6 +51,13 @@ async function seedEverything(c: pg.Client, orgId: string): Promise<void> {
       internalEventId: ctx.eventId,
     }),
   ); // stripe_event + payment + ledger payment entry
+  // fundraising: sponsorship_level, sponsorship, donation, lot_award (via award)
+  await c.query(
+    'insert into sponsorship_level(org_id, event_id, name, amount_cents, benefit_fmv_cents) values ($1,$2,$3,$4,$5)',
+    [orgId, ctx.eventId, 'Gold', 500_000, 60_000],
+  );
+  await recordSponsorship(c, ctx.eventId, ctx.consignorId, 500_000n, 60_000n, `spon_${orgId}`);
+  await recordDonation(c, ctx.eventId, ctx.buyerId, 100_000n, `don_${orgId}`);
 }
 
 test('every base table has RLS enabled and forced', async () => {
