@@ -102,8 +102,9 @@ picker. Migrations apply to the operator's own project; a new operator is a new
 Supabase project and the same build — no per-operator code. Actual deployment
 needs your Vercel + Supabase accounts.
 
-> Not yet wired: authentication (Supabase Auth → the `app.current_org` claim).
-> The console currently assumes a trusted operator session.
+Authentication is wired in Phase 6 (below). Without Supabase env vars the console
+runs in **open mode** (org picker, no login) so local dev and the demo need zero
+setup.
 
 ## Phase 5 (this repo) — Offline venue hub
 
@@ -157,3 +158,36 @@ Raffles. Regulated charitable gaming (La. R.S. 4:707 / 14:90), pending legal
 review — no tables, routes, models, or stubs. The ledger already expresses
 party-money-movement generically, so a raffle becomes a module that writes
 ledger entries if and when it is cleared. See `docs/ARCHITECTURE.md` §4.4.
+
+## Phase 6 (this repo) — Supabase Auth + JWT-native tenancy
+
+Real multi-tenant auth on Supabase, without breaking local dev. `current_org()`
+resolves the tenant from three sources in order: the `app.current_org` GUC
+(tests + server-derived context) → a Supabase JWT `org_id` claim → the signed-in
+user's `membership`. The GUC keeps top priority, so **all prior tests and the
+local demo are unaffected**. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §16.
+
+- Auth + membership schema: `supabase/migrations/0016_auth.sql` (idempotent
+  Supabase compat shim, `membership`, dual-source `current_org()`,
+  `authenticated`-role grants, `resolve_user_org`/`is_member`/`add_member`)
+- App auth: `app/lib/supabase/`, `app/lib/auth.ts`, `middleware.ts`, `app/login/`
+
+The Supabase path is proven **locally against the real `authenticated` role**
+(SET ROLE authenticated + a simulated `request.jwt.claims`), no live Supabase
+needed for the tests.
+
+| Requirement | Test |
+|---|---|
+| JWT `org_id` claim scopes RLS to that org (read + write) on `authenticated` | `test/jwt-tenant-context.test.ts` |
+| With no GUC/claim, membership resolves the org via `auth.uid()` | `test/jwt-tenant-context.test.ts` |
+| The `app.current_org` GUC still wins over a JWT claim (prior tests stay green) | `test/jwt-tenant-context.test.ts` |
+| A user sees only their own membership row | `test/jwt-tenant-context.test.ts` |
+
+### Turning auth on
+
+Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` (see
+`.env.example`). The app then requires sign-in, scopes each operator to their own
+org via `membership`, and blocks URL-tampering across orgs (`assertMember`).
+Seed a first operator admin with `select add_member('<auth-user-id>','<org-id>','owner');`.
+End-to-end login requires the live Supabase project (GoTrue); the DB behavior is
+covered by the tests above.

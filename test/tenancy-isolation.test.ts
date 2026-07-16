@@ -23,10 +23,15 @@ async function tenantTables(): Promise<{ table: string; col: string }[]> {
     where n.nspname = 'public' and c.relkind = 'r'
     order by c.relname
   `);
-  return rows.map((r) => ({
-    table: r.table,
-    col: r.has_org_id ? 'org_id' : r.table === 'org' ? 'id' : '__none__',
-  }));
+  return rows
+    // `membership` is isolated by USER (user_id = auth.uid()), a different axis
+    // than org_id; it has its own dedicated test (jwt-tenant-context). It still
+    // must have RLS forced — covered by the "every base table has RLS" test.
+    .filter((r) => r.table !== 'membership')
+    .map((r) => ({
+      table: r.table,
+      col: r.has_org_id ? 'org_id' : r.table === 'org' ? 'id' : '__none__',
+    }));
 }
 
 // Seed every tenant table for one org, so the "sees its own rows" assertion is

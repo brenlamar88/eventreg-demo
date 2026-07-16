@@ -11,6 +11,7 @@ import {
   lotsWithStatus,
 } from '../../../../lib/queries';
 import { usd } from '../../../../lib/format';
+import { assertMember } from '../../../../lib/auth';
 import {
   addPartyAction,
   addLotAction,
@@ -31,6 +32,7 @@ export default async function EventPage({
   params: { orgId: string; eventId: string };
 }) {
   const { orgId, eventId } = params;
+  await assertMember(orgId); // no-op in open mode; enforces membership with auth on
   const [org, event] = await Promise.all([getOrg(orgId), getEvent(orgId, eventId)]);
   if (!org || !event) notFound();
 
