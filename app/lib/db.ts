@@ -83,6 +83,16 @@ export async function adminQuery(text: string, params?: unknown[]): Promise<pg.Q
   return adminPool().query(text, params as any[]);
 }
 
+// Which required DB env vars are missing in production. Pages use this to render
+// a "setup required" screen instead of crashing into the error boundary.
+export function missingDbEnv(): string[] {
+  if (!isProd) return [];
+  const missing: string[] = [];
+  if (!APP_URL) missing.push('DATABASE_URL_APP');
+  if (!ADMIN_URL) missing.push('DATABASE_URL_ADMIN');
+  return missing;
+}
+
 // Connectivity + schema probe for /api/health. Never throws — reports the reason
 // instead, so a deploy can be diagnosed at a glance.
 export async function dbHealth(): Promise<{
