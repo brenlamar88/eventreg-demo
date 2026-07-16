@@ -93,3 +93,8 @@ Hit `GET /api/health` (no auth required):
 - `503` with `migrationsApplied: false` — connected, but migrations haven't run
   against this database.
 - `auth: "open-mode"` means the `NEXT_PUBLIC_SUPABASE_*` vars are unset (no login).
+
+> **After adding the Supabase integration:** env vars apply only to NEW builds.
+> If `/api/health` still reports `DATABASE_URL_APP is not set` after connecting
+> the integration, trigger a redeploy (Deployments → ⋯ → Redeploy, or push any
+> commit) so the build picks them up.
