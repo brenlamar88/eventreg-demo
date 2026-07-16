@@ -82,3 +82,29 @@ export async function withOrg<T>(
 export async function adminQuery(text: string, params?: unknown[]): Promise<pg.QueryResult> {
   return adminPool().query(text, params as any[]);
 }
+
+// Connectivity + schema probe for /api/health. Never throws — reports the reason
+// instead, so a deploy can be diagnosed at a glance.
+export async function dbHealth(): Promise<{
+  connected: boolean;
+  error?: string;
+  checks: Record<string, boolean>;
+}> {
+  try {
+    const client = await appPool().connect();
+    try {
+      const { rows } = await client.query(`
+        select
+          to_regclass('public.ledger_entry')      is not null as ledger,
+          to_regclass('public.membership')        is not null as membership,
+          to_regprocedure('public.current_org()') is not null as current_org,
+          to_regclass('public.v_platform_billing') is not null as billing
+      `);
+      return { connected: true, checks: rows[0] as Record<string, boolean> };
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    return { connected: false, error: (err as Error).message, checks: {} };
+  }
+}
