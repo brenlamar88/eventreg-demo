@@ -27,11 +27,21 @@ function connString(url: string | undefined, localFallback: string, envName: str
 }
 
 // node-postgres does NOT enable SSL by default, but Supabase (and most hosted
-// Postgres) require it. Enable SSL for any non-local host.
+// Postgres) require it. Two gotchas handled here:
+//  1. a `sslmode=` in the URL (Supabase's POSTGRES_URL ships `sslmode=require`)
+//     OVERRIDES the `ssl` option passed to Pool, and `require` still verifies
+//     the chain — which fails on Supabase's pooler cert ("self-signed
+//     certificate in certificate chain"). Normalize to sslmode=no-verify.
+//  2. with no sslmode in the URL, pass ssl:{rejectUnauthorized:false} directly.
+function normalizeHostedUrl(url: string): string {
+  if (/[?&]sslmode=/.test(url)) return url.replace(/sslmode=[^&]*/g, 'sslmode=no-verify');
+  return url + (url.includes('?') ? '&' : '?') + 'sslmode=no-verify';
+}
+
 function poolFor(url: string, max: number): pg.Pool {
   const isLocal = /@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(url);
   return new pg.Pool({
-    connectionString: url,
+    connectionString: isLocal ? url : normalizeHostedUrl(url),
     max,
     ssl: isLocal ? undefined : { rejectUnauthorized: false },
   });
