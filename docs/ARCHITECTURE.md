@@ -346,3 +346,77 @@ Phase 1:
 
 Signed off to proceed to **Phase 1** (party model + ledger + multi-tenancy),
 tests first, then the schema + RLS to satisfy them.
+
+---
+
+## 12. Phase 2 — Payments (Stripe Connect, destination charges)
+
+Phase 1 records *obligations* (buyer invoices, consignor payouts, realized fees).
+Phase 2 makes money actually move — on the **operator's own** Stripe account,
+never ours — and books what happened back into the same append-only ledger.
+
+### 12.1 We never touch funds (contractual)
+
+- Each operator connects **their own** Stripe Connect account. It is a config
+  row (`stripe_account`), one per org — no fork.
+- All charges are **destination charges**: the platform creates the
+  PaymentIntent with `transfer_data.destination = <operator acct>` and an
+  `application_fee_amount` = our realized fee. Funds settle into the operator's
+  balance; we only ever receive the application fee. The platform never holds
+  operator money.
+- Consequence enforced in code: `record_payment` **refuses** to book a
+  collection for an org with no `stripe_account` — you cannot take money without
+  the operator's own Connect account behind it.
+
+### 12.2 The application fee IS the billing base
+
+`application_fee_amount` on the destination charge is, by construction, the
+platform's cut. It must equal `operator_revenue` (Σ premium + Σ commission) from
+§7.1 — the same realized-fee figure both parties audit. Phase 2 adds
+`v_platform_billing(org, event)` exposing `realized_fee_cents`,
+`application_fee_collected_cents`, and their `delta`. **A non-zero delta is a
+billing bug**, and a property test drives it to zero across arbitrary auctions.
+
+### 12.3 Webhooks: a duplicate is physically incapable of double-writing
+
+- Stripe delivers webhooks **at least once**; retries and duplicates are normal.
+- Ingestion is two guards deep: the raw event is recorded in `stripe_event`
+  with `UNIQUE (org_id, stripe_event_id)`, and the ledger `payment`/`payout`
+  entry it produces is keyed `idempotency_key = 'stripe:' || event.id`, hitting
+  the §4.2 `UNIQUE (org_id, idempotency_key)`. Either way, redelivery is a no-op.
+- **Signatures are verified for real**, not stubbed: HMAC-SHA256 over
+  `"{timestamp}.{payload}"` against the endpoint's signing secret, constant-time
+  compare, timestamp tolerance to defeat replay. An unsigned or tampered body is
+  rejected before it can touch the ledger. (`src/stripe/webhook.ts`.)
+
+### 12.4 Reconciliation (money moved vs. money owed)
+
+Payments are ledger entries, not a side table of truth:
+- `payment` entry: `role='buyer'`, `entry_type='payment'`, **negative** amount
+  (reduces what the buyer owes). `v_buyer_account` = invoice − paid = balance.
+- `payout` entry: `role='consignor'`, `entry_type='payout'`, negative amount
+  (reduces what we owe the consignor). `v_consignor_account` = owed − paid.
+- `v_buyer_invoice` is redefined to sum only the **charge** types
+  (`hammer` + `buyers_premium`) so it stays gross once payments exist; balance
+  lives in `v_buyer_account`. Phase 1's settlement tests are unaffected (no
+  payments present in them).
+
+### 12.5 What Phase 2 does NOT do
+
+No card data, no PCI surface (Stripe Elements/Checkout on the operator's front
+end handles that), no funds custody, and no charge *creation* here — creation is
+an operator-side edge function; this layer verifies, ingests, and reconciles.
+Payout *initiation* (operator clicking "pay consignors") is deferred; Phase 2
+records payouts that occurred.
+
+### 12.6 Phase 2 definition of done (executable)
+
+- A duplicate Stripe webhook (same `event.id`), delivered any number of times,
+  yields exactly one ledger entry and one `stripe_event` row (property test).
+- Webhook signature verification accepts a correctly signed body and rejects
+  tampered payloads, wrong secrets, missing `v1`, and stale timestamps.
+- `record_payment` refuses an org with no connected account.
+- `v_buyer_account` / `v_consignor_account` balances are correct across
+  arbitrary auctions + partial/over payments (property test).
+- `v_platform_billing.delta = 0` when application fees equal realized fees, and
+  is detectably non-zero otherwise (property test).

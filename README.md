@@ -33,6 +33,24 @@ idempotency-keyed, and append-only.
 The idempotency, reversal, and settlement tests are **property tests**
 (`fast-check`), not happy-path examples.
 
+## Phase 2 (this repo)
+
+Payments on the operator's **own** Stripe Connect account (destination charges —
+we never touch funds), idempotent webhook ingestion into the same append-only
+ledger, buyer/consignor reconciliation, and the application-fee billing-base
+audit. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §12.
+
+- Config + audit + payments schema: `supabase/migrations/0011_stripe.sql`,
+  `0012_payments.sql`
+- Webhook verification + ingestion: [`src/stripe/`](src/stripe)
+
+| Requirement | Test |
+|---|---|
+| Webhook signature verified for real (accept / tamper / wrong secret / missing v1 / stale) | `test/stripe-webhook-signature.test.ts` |
+| Duplicate Stripe webhook is physically incapable of double-writing | `test/stripe-ingest.property.test.ts` |
+| Buyer/consignor balances reconcile; `record_payment` refuses an org with no Connect account | `test/stripe-ingest.property.test.ts` |
+| Application fee collected reconciles against realized ledger fee (billing base) | `test/stripe-ingest.property.test.ts` |
+
 ## Running the tests
 
 Requires Node 22 and PostgreSQL 16.

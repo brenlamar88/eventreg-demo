@@ -2,6 +2,8 @@ import { test, expect, afterAll } from 'vitest';
 import type pg from 'pg';
 import { admin, createOrg, orgClient, closeAll } from './helpers/db.ts';
 import { makeAuction, postAward } from './helpers/seed.ts';
+import { connectStripe, paymentIntentSucceeded } from './helpers/stripe.ts';
+import { ingestEvent } from '../src/stripe/ingest.ts';
 
 afterAll(closeAll);
 
@@ -35,6 +37,19 @@ async function seedEverything(c: pg.Client, orgId: string): Promise<void> {
     'insert into party_representation(org_id, agent_party_id, principal_party_id) values ($1,$2,$3)',
     [orgId, ctx.buyerId, ctx.consignorId],
   );
+  await connectStripe(c, orgId); // stripe_account
+  await ingestEvent(
+    c,
+    orgId,
+    paymentIntentSucceeded({
+      eventId: `evt_${orgId}`,
+      paymentIntentId: `pi_${orgId}`,
+      amountCents: 110_000n,
+      applicationFeeCents: 15_000n,
+      partyId: ctx.buyerId,
+      internalEventId: ctx.eventId,
+    }),
+  ); // stripe_event + payment + ledger payment entry
 }
 
 test('every base table has RLS enabled and forced', async () => {
