@@ -65,3 +65,20 @@ silently defeat tenant isolation. `app_user` is a plain role with RLS applied,
 and `current_org()` reads the org the server derived from the verified Supabase
 session. (A future option is to move reads onto `authenticated` via PostgREST;
 the schema already supports it — see `docs/ARCHITECTURE.md` §16.)
+
+## Verifying a deploy
+
+Hit `GET /api/health` (no auth required):
+
+```json
+{ "status": "ok", "db": "connected",
+  "migrations": { "ledger": true, "membership": true, "current_org": true, "billing": true },
+  "migrationsApplied": true, "auth": "configured" }
+```
+
+- `200 ok` — DB reachable and all migrations applied.
+- `503` with `db: "unreachable"` + `dbError` — the connection string / SSL /
+  `app_user` password is wrong (the `dbError` says which).
+- `503` with `migrationsApplied: false` — connected, but migrations haven't run
+  against this database.
+- `auth: "open-mode"` means the `NEXT_PUBLIC_SUPABASE_*` vars are unset (no login).
