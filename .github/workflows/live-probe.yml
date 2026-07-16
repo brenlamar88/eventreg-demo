@@ -1,0 +1,21 @@
+name: live-probe
+# Diagnostic: probe the LIVE production site and print status + body into the
+# Actions log. Runs on push to its own branch and on manual dispatch.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/live-probe]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe production endpoints
+        run: |
+          BASE="https://eventreg-demo.vercel.app"
+          UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+          for path in /api/health / /orgs /login; do
+            echo "::group::GET $BASE$path"
+            curl -sS -L --max-time 30 -A "$UA" -w "\n---\nHTTP %{http_code}\n" "$BASE$path" | head -c 6000 || echo "CURL FAILED"
+            echo "::endgroup::"
+          done
