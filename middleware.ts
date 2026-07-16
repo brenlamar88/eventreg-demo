@@ -1,13 +1,21 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
-// When Supabase is configured, refresh the auth session on every request and
-// require a signed-in user for everything except /login and static assets.
-// When it is not configured (local demo), this middleware is a pass-through.
+// When auth is enabled, refresh the session on every request and require a
+// signed-in user for everything except /login, API routes, and static assets.
+// Otherwise this middleware is a pass-through (open mode).
 export async function middleware(request: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
-  if (!url || !anon) return NextResponse.next();
+  const authOn = process.env.NEXT_PUBLIC_AUTH_ENABLED === 'true';
+  const path = request.nextUrl.pathname;
+  // API routes (e.g. /api/health, webhooks) do their own auth and must stay
+  // reachable even when locked out — never gate them behind the login redirect.
+  const isApi = path.startsWith('/api');
+  // Open mode (default) or missing keys: no auth gate. Login is only enforced
+  // when explicitly enabled, so the Supabase integration setting these keys does
+  // not lock out a site that has no users yet.
+  if (!authOn || !url || !anon || isApi) return NextResponse.next();
 
   let response = NextResponse.next({ request });
   const supabase = createServerClient(url, anon, {

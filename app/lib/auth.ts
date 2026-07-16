@@ -1,6 +1,6 @@
 import 'server-only';
 import { redirect } from 'next/navigation';
-import { supabaseConfigured } from './supabase/env';
+import { authEnabled } from './supabase/env';
 import { createSupabaseServerClient } from './supabase/server';
 import { withOrg } from './db';
 
@@ -12,7 +12,7 @@ export interface SessionUser {
 // The verified signed-in user, or null (including whenever auth is not
 // configured — "open" demo mode).
 export async function getUser(): Promise<SessionUser | null> {
-  if (!supabaseConfigured()) return null;
+  if (!authEnabled()) return null;
   const supabase = createSupabaseServerClient();
   const {
     data: { user },
@@ -38,7 +38,7 @@ export async function currentUserOrg(user: SessionUser): Promise<string | null> 
 // it requires a signed-in user who is a member of `orgId`, so a logged-in
 // operator cannot reach another org by editing the URL.
 export async function assertMember(orgId: string): Promise<void> {
-  if (!supabaseConfigured()) return; // open demo mode
+  if (!authEnabled()) return; // open demo mode
   const user = await getUser();
   if (!user) redirect('/login');
   const isMember = await withOrg('00000000-0000-0000-0000-000000000000', async (q) => {

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { dbHealth } from '../../lib/db';
-import { supabaseConfigured } from '../../lib/supabase/env';
+import { supabaseConfigured, authEnabled } from '../../lib/supabase/env';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,7 +21,7 @@ export async function GET() {
       ...(db.error ? { dbError: db.error } : {}),
       migrations: db.checks,
       migrationsApplied,
-      auth: supabaseConfigured() ? 'configured' : 'open-mode',
+      auth: authEnabled() ? 'enabled' : supabaseConfigured() ? 'keys-set-open-mode' : 'open-mode',
       time: new Date().toISOString(),
     },
     { status: ok ? 200 : 503 },
