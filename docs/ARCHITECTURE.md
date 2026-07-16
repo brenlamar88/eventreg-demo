@@ -489,3 +489,49 @@ standard gala treatment; flag if your CPA wants premium excluded.
 - `lot_award` amounts equal the ledger's award entries (property test).
 - Donations/sponsorships do not change `v_platform_billing` (billing base is
   fees only).
+
+---
+
+## 14. Phase 4 — Operator Console (Next.js, Vercel-ready)
+
+A thin app surface over the same schema, to make the platform demoable. It adds
+no business logic — every money figure it shows is a projection the database
+already computes, read through the RLS-enforced tenant path.
+
+### 14.1 RLS is enforced by the app, not bypassed
+
+The app connects as the non-superuser `app_user`. Every request runs inside a
+transaction that does `select set_config('app.current_org', <org>, true)` before
+querying (`app/lib/db.ts` `withOrg`), so a pooled connection can never carry one
+tenant's context into another's request. The isolation the Phase 1 tests prove
+is the same isolation the UI relies on — there is no service-role shortcut in the
+read path. The only cross-tenant screen is the operator picker, which uses the
+admin pool deliberately and visibly.
+
+### 14.2 What it shows (all projections, zero new math)
+
+- **Operators list** — every tenant with its live realized-fee total.
+- **Operator dashboard** — realized fees across events (the billing base).
+- **Event money view** — the whole thesis on one screen: realized fees vs.
+  application fee collected with a reconciliation delta; parties with the *set*
+  of roles they hold (a `multi-role` badge where a party spans several); buyer
+  and consignor accounts (invoice/owed − paid = balance); and the consolidated
+  donor tax receipt spanning sponsor + buyer + donor. Server-action forms
+  (post award, record donation/sponsorship/payment) let a demo move the numbers.
+
+### 14.3 Deployment (operator-owned, no forking)
+
+Vercel + the operator's own Supabase. The app reads `DATABASE_URL_APP` /
+`POSTGRES_URL` (the Supabase pooler as `app_user`) and, for the platform screen,
+an admin URL. Migrations in `supabase/migrations/` apply to the operator's own
+project. Nothing about deployment is per-operator code — a new operator is a new
+Supabase project + the same build. `pg` is kept out of the edge bundle
+(`serverComponentsExternalPackages`); all DB routes run on the Node runtime.
+
+### 14.4 Not yet built
+
+Authentication (Supabase Auth → the `app.current_org` claim), the offline venue
+hub (NUC sync + ZPL badge printing), and payment *creation* UI (Stripe
+Elements/Checkout on the operator's front end). The console today assumes a
+trusted operator session; wiring real auth to the tenant GUC is the next step
+before production.

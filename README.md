@@ -68,6 +68,43 @@ write. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §13.
 | Fundraising income never inflates the platform billing base (fees only) | `test/tax-receipt.property.test.ts` |
 | `lot_award` amounts never drift from the ledger | `test/lot-award-invariant.property.test.ts` |
 
+## Phase 4 (this repo) — Operator Console
+
+A Next.js (App Router) app over the same schema, to make the platform demoable.
+It adds no money logic — every figure is a projection the database already
+computes, read through the RLS-enforced tenant path (`app/lib/db.ts`). See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §14.
+
+- App: [`app/`](app) — `/orgs`, `/orgs/[orgId]`, `/orgs/[orgId]/events/[eventId]`
+- The event view shows realized fees vs. fee collected, parties with their
+  *set* of roles (a `multi-role` badge), buyer/consignor balances, and the
+  consolidated donor tax receipt — with server-action forms to move the numbers.
+
+### Running the console locally
+
+```bash
+npm install
+npm run db:start                 # local PG16 on 127.0.0.1:55432
+npm run db:migrate               # apply all migrations
+npm run db:seed                  # a fully-populated demo operator
+npm run dev                      # http://localhost:3000  (visit /orgs)
+```
+
+`npm run db:seed` prints a deep link to the demo event. Set `DATABASE_URL_APP`
+(app, as `app_user`) and `DATABASE_URL_ADMIN` (platform screen) to point at
+another database.
+
+### Deploying (operator-owned)
+
+Vercel + the operator's own Supabase. The app reads `DATABASE_URL_APP` /
+`POSTGRES_URL` (Supabase pooler as `app_user`) and an admin URL for the operator
+picker. Migrations apply to the operator's own project; a new operator is a new
+Supabase project and the same build — no per-operator code. Actual deployment
+needs your Vercel + Supabase accounts.
+
+> Not yet wired: authentication (Supabase Auth → the `app.current_org` claim).
+> The console currently assumes a trusted operator session.
+
 ## Running the tests
 
 Requires Node 22 and PostgreSQL 16.

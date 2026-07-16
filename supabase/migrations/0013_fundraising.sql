@@ -143,6 +143,13 @@ begin
   values
     (v_org, p_lot_id, p_buyer_party_id, p_hammer_cents, v_premium, v_commission, p_as_of)
   on conflict (lot_id) do nothing;
+
+  -- Winning a lot makes the party a buyer at the event; the consignor holds the
+  -- consignor role. These make the multi-role model visible and queryable.
+  insert into role_at_event (org_id, event_id, party_id, role)
+  values (v_org, v_event, p_buyer_party_id, 'buyer'),
+         (v_org, v_event, v_consignor, 'consignor')
+  on conflict (org_id, event_id, party_id, role) do nothing;
 end $$;
 
 -- Record a sponsorship commitment: ledger entry + metadata + sponsor role.
