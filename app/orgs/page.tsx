@@ -1,13 +1,18 @@
 import { redirect } from 'next/navigation';
 import { listOrgs } from '../lib/queries';
+import { missingDbEnv } from '../lib/db';
 import { usd } from '../lib/format';
 import { createOrgAction, seedDemoAction } from '../lib/actions';
 import { supabaseConfigured } from '../lib/supabase/env';
+import { SetupRequired } from '../components/setup-required';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export default async function OrgsPage() {
+  // Unconfigured deploy: render the setup checklist, never a 500.
+  const missing = missingDbEnv();
+  if (missing.length > 0) return <SetupRequired missing={missing} />;
   // The cross-tenant platform list is open-mode only. With auth on, operators
   // are scoped to their own org (root redirects them there).
   if (supabaseConfigured()) redirect('/');

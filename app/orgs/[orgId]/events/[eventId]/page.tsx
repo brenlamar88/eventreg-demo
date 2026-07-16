@@ -12,6 +12,8 @@ import {
 } from '../../../../lib/queries';
 import { usd } from '../../../../lib/format';
 import { assertMember } from '../../../../lib/auth';
+import { missingDbEnv } from '../../../../lib/db';
+import { SetupRequired } from '../../../../components/setup-required';
 import {
   addPartyAction,
   addLotAction,
@@ -32,6 +34,8 @@ export default async function EventPage({
   params: { orgId: string; eventId: string };
 }) {
   const { orgId, eventId } = params;
+  const missing = missingDbEnv();
+  if (missing.length > 0) return <SetupRequired missing={missing} />;
   await assertMember(orgId); // no-op in open mode; enforces membership with auth on
   const [org, event] = await Promise.all([getOrg(orgId), getEvent(orgId, eventId)]);
   if (!org || !event) notFound();

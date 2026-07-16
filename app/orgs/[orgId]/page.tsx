@@ -3,11 +3,15 @@ import { getOrg, orgRealizedFee, listEvents } from '../../lib/queries';
 import { usd } from '../../lib/format';
 import { createEventAction } from '../../lib/actions';
 import { assertMember } from '../../lib/auth';
+import { missingDbEnv } from '../../lib/db';
+import { SetupRequired } from '../../components/setup-required';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export default async function OrgDashboard({ params }: { params: { orgId: string } }) {
+  const missing = missingDbEnv();
+  if (missing.length > 0) return <SetupRequired missing={missing} />;
   await assertMember(params.orgId); // no-op in open mode; enforces membership with auth on
   const org = await getOrg(params.orgId);
   if (!org) notFound();
