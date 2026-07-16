@@ -3,7 +3,7 @@ import { listOrgs } from '../lib/queries';
 import { missingDbEnv } from '../lib/db';
 import { usd } from '../lib/format';
 import { createOrgAction, seedDemoAction } from '../lib/actions';
-import { supabaseConfigured } from '../lib/supabase/env';
+import { authEnabled } from '../lib/supabase/env';
 import { SetupRequired } from '../components/setup-required';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +15,7 @@ export default async function OrgsPage() {
   if (missing.length > 0) return <SetupRequired missing={missing} />;
   // The cross-tenant platform list is open-mode only. With auth on, operators
   // are scoped to their own org (root redirects them there).
-  if (supabaseConfigured()) redirect('/');
+  if (authEnabled()) redirect('/');
   const orgs = await listOrgs();
 
   return (

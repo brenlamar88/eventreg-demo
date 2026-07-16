@@ -37,11 +37,22 @@ alter role app_user with login password '<APP_DB_PASSWORD>';
 |---|---|
 | `DATABASE_URL_APP` | `postgres://app_user:<APP_DB_PASSWORD>@<db-host>:5432/postgres` — use the **Session pooler** or direct connection string from Supabase → Project Settings → Database, but swap the role/password to `app_user`. |
 | `DATABASE_URL_ADMIN` | The `postgres` role connection string (Supabase gives this). Only used by open-mode/platform screens and org onboarding; optional in a single-operator auth deployment. |
-| `NEXT_PUBLIC_SUPABASE_URL` | Your project URL, e.g. `https://<ref>.supabase.co`. Enables login. |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | The anon key. Enables login. |
+| `NEXT_PUBLIC_SUPABASE_URL` | Your project URL, e.g. `https://<ref>.supabase.co`. (Login only turns on with the flag below.) |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | The anon key. |
+| `NEXT_PUBLIC_AUTH_ENABLED` | Set to `true` to REQUIRE login. Leave unset for open mode. |
 
-Leave the `NEXT_PUBLIC_SUPABASE_*` vars unset to run in **open mode** (org
-picker, no login) — useful for a quick demo deploy.
+**Open mode vs. login.** The Supabase keys alone do **not** turn on login — that
+way the one-click Supabase↔Vercel integration (which sets `NEXT_PUBLIC_SUPABASE_*`
+and `POSTGRES_URL` for you) lands you in a working **open-mode** site instead of
+locking you out before any users exist. Set `NEXT_PUBLIC_AUTH_ENABLED=true` only
+once you've created a user and seeded a membership (step 4).
+
+> **Fastest deploy:** add the **Supabase integration** in Vercel (Project →
+> Integrations). It injects `POSTGRES_URL` / `POSTGRES_URL_NON_POOLING` and the
+> Supabase keys automatically. The app reads `POSTGRES_URL` as a fallback, so it
+> comes up in open mode with zero manual string-building. (It connects as the
+> `postgres` role that way — do the `app_user` swap above before onboarding real
+> multiple operators, so RLS enforces tenant isolation.)
 
 > Use the **Session pooler** (or direct) connection for `DATABASE_URL_APP`, not
 > the transaction pooler — `withOrg` runs `BEGIN … set_config … COMMIT` per

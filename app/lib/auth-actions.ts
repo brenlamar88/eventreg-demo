@@ -1,11 +1,11 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { supabaseConfigured } from './supabase/env';
+import { authEnabled } from './supabase/env';
 import { createSupabaseServerClient } from './supabase/server';
 
 export async function signInAction(form: FormData) {
-  if (!supabaseConfigured()) redirect('/');
+  if (!authEnabled()) redirect('/');
   const email = String(form.get('email') ?? '');
   const password = String(form.get('password') ?? '');
   const supabase = createSupabaseServerClient();
@@ -15,7 +15,7 @@ export async function signInAction(form: FormData) {
 }
 
 export async function signOutAction() {
-  if (supabaseConfigured()) {
+  if (authEnabled()) {
     const supabase = createSupabaseServerClient();
     await supabase.auth.signOut();
   }

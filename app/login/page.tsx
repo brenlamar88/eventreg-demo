@@ -1,5 +1,5 @@
 import { signInAction } from '../lib/auth-actions';
-import { supabaseConfigured } from '../lib/supabase/env';
+import { authEnabled } from '../lib/supabase/env';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -14,7 +14,7 @@ export default function LoginPage({
       <h1>Sign in</h1>
       <p className="sub">Operator console</p>
 
-      {!supabaseConfigured() ? (
+      {!authEnabled() ? (
         <div className="card">
           <p className="muted" style={{ marginTop: 0 }}>
             Auth is not configured in this environment. The console is running in open
