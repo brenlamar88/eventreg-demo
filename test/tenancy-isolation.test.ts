@@ -58,6 +58,24 @@ async function seedEverything(c: pg.Client, orgId: string): Promise<void> {
   );
   await recordSponsorship(c, ctx.eventId, ctx.consignorId, 500_000n, 60_000n, `spon_${orgId}`);
   await recordDonation(c, ctx.eventId, ctx.buyerId, 100_000n, `don_${orgId}`);
+  // offline hub: registration (LWW), bid, sync_outbox, sync_device_cursor
+  await c.query("select enqueue_op('seed-dev', 1, 'registration', $1)", [
+    JSON.stringify({
+      event_id: ctx.eventId,
+      party_id: ctx.buyerId,
+      status: 'registered',
+      updated_at: '2026-07-16T18:00:00Z',
+    }),
+  ]);
+  await c.query("select enqueue_op('seed-dev', 2, 'bid', $1)", [
+    JSON.stringify({
+      event_id: ctx.eventId,
+      lot_id: ctx.lotId,
+      bidder_party_id: ctx.buyerId,
+      amount_cents: '5000',
+      placed_at: '2026-07-16T19:00:00Z',
+    }),
+  ]);
 }
 
 test('every base table has RLS enabled and forced', async () => {

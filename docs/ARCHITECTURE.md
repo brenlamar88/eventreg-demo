@@ -530,8 +530,93 @@ Supabase project + the same build. `pg` is kept out of the edge bundle
 
 ### 14.4 Not yet built
 
-Authentication (Supabase Auth → the `app.current_org` claim), the offline venue
-hub (NUC sync + ZPL badge printing), and payment *creation* UI (Stripe
-Elements/Checkout on the operator's front end). The console today assumes a
-trusted operator session; wiring real auth to the tenant GUC is the next step
-before production.
+Authentication (Supabase Auth → the `app.current_org` claim) and payment
+*creation* UI (Stripe Elements/Checkout on the operator's front end). The
+console today assumes a trusted operator session; wiring real auth to the
+tenant GUC is the next step before production.
+
+---
+
+## 15. Phase 5 — Offline venue hub (sync queue + badge printing)
+
+Events run in venues with **no internet**. The venue hub (Postgres on a NUC) is
+authoritative during the event window; the cloud is authoritative outside it.
+iPads talk to the hub over LAN. This phase builds the data machinery that makes
+that safe: the replayable op queue, the fixed conflict policy, and raw-ZPL badge
+printing. The conflict policy is FIXED (contractual, not tunable):
+
+- **bids: APPEND-ONLY. Never merge. Never drop.** A lost bid is a lawsuit.
+- **registrations: last-write-wins.**
+
+### 15.1 Sync is a replayable monotonic-sequence queue, not a diff
+
+Every offline-capable mutation is an **op**: `(device_id, device_seq, op_type,
+payload)`. The device numbers its own ops with a per-device monotonic sequence
+starting at 1. Ops land in `sync_outbox` (append-only, UNIQUE
+`(org_id, device_id, device_seq)`) *in the same transaction* that applies them
+locally, so the queue can never disagree with local state.
+
+Replay (`src/hub/sync.ts`) ships outbox rows the target hasn't seen and applies
+them through `apply_sync_op`, which enforces three guarantees per device via a
+`sync_device_cursor` high-water mark:
+
+1. **Idempotent redelivery**: `seq ≤ cursor` is a recorded no-op — replaying
+   the whole queue N times equals replaying it once (property-tested).
+2. **In-order apply**: `seq = cursor + 1` applies and advances the cursor.
+3. **Gap refusal**: `seq > cursor + 1` raises. A missing op halts that device's
+   stream loudly instead of silently skipping — silence is how bids get lost.
+
+Ordering is **per device**; there is no cross-device ordering requirement, so
+hub↔cloud sync in either direction is just "replay the other side's outbox".
+Two-way sync = run replay twice with source/target swapped. Ops carry the
+originating device, so a synced op is never re-outboxed (no loops).
+
+### 15.2 Bids: append-only, ledger discipline without being money
+
+A bid is an *intent*, not money — it only touches the ledger at award time
+(`post_lot_award`, Phase 1). But it gets the full ledger discipline anyway:
+integer cents, append-only enforced by trigger + withheld UPDATE/DELETE grants,
+and natural idempotency key `(org_id, device_id, device_seq)`. The sync
+property test drives arbitrary interleaved bids from multiple devices with
+duplicate deliveries and asserts the cloud ends with **exactly the union** —
+no bid lost, no bid merged, none double-applied.
+
+### 15.3 Registrations: last-write-wins with a deterministic tiebreak
+
+`registration` upserts on `(org_id, event_id, party_id)`; an op wins iff
+`(updated_at, source_device_id)` is strictly greater than the stored pair. The
+device-id tiebreak makes convergence **order-independent**: two hubs that saw
+conflicting writes converge to the identical row no matter which syncs first
+(property-tested by applying op pairs in both orders). Applying a registration
+also grants the `registrant` role_at_event (idempotent).
+
+### 15.4 Badge printing: raw ZPL to TCP:9100
+
+`src/hub/zpl.ts` renders a badge (name, event, role chips) as ZPL II and writes
+the raw bytes to the printer's TCP:9100 — the Zebra ZD421D's raw port. No
+driver, no queue daemon; the test runs a real TCP server and asserts the exact
+bytes arrive. ZPL is escaped (`^`, `~`, non-ASCII) so a name can't inject
+printer commands.
+
+### 15.5 What stays out of scope here
+
+The event-window scheduler (flipping which side is authoritative) is an
+operational toggle, not data machinery — LWW and append-only make both
+directions safe regardless of who leads. iPad UI and hub provisioning
+(Postgres-on-NUC install) are deployment work, not schema. **Assumption A5**:
+bids reference lots/parties that exist on both sides before bidding starts
+(pre-event sync); a bid for an unknown lot fails apply loudly rather than being
+dropped.
+
+### 15.6 Phase 5 definition of done (executable)
+
+- Arbitrary bid streams from multiple devices, delivered with duplicates and
+  re-replayed, sync to exactly the union on the target (property test).
+- Replaying the full queue N times = replaying once; a sequence gap is refused
+  loudly (property test).
+- Conflicting registration writes converge to the same winner in either apply
+  order (property test).
+- Bid table rejects UPDATE/DELETE like the ledger does.
+- Badge ZPL bytes arrive intact at a real TCP:9100 listener; ZPL injection via
+  display names is escaped.
+- New tables covered by the self-extending cross-org isolation test.

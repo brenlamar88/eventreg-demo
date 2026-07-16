@@ -105,6 +105,31 @@ needs your Vercel + Supabase accounts.
 > Not yet wired: authentication (Supabase Auth → the `app.current_org` claim).
 > The console currently assumes a trusted operator session.
 
+## Phase 5 (this repo) — Offline venue hub
+
+Events run in venues with no internet. The venue hub (Postgres on a NUC) is
+authoritative during the event window; sync is a **replayable monotonic-sequence
+op queue**, not a diff. The conflict policy is fixed: **bids are append-only
+(never merged, never dropped)**; registrations are last-write-wins. Badges print
+as raw ZPL to the Zebra ZD421D's TCP:9100. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §15.
+
+- Queue + conflict policy in SQL: `supabase/migrations/0015_offline.sql`
+  (`sync_outbox`, `sync_device_cursor`, `enqueue_op`/`apply_sync_op`, `bid`,
+  `registration`)
+- Replay + printing: [`src/hub/`](src/hub) (`sync.ts`, `zpl.ts`)
+
+The sync tests run against **two real Postgres databases** (hub + cloud) and
+replay the queue between them — no mocks.
+
+| Requirement | Test |
+|---|---|
+| Bids from many devices sync to exactly the union — never lost, merged, or doubled | `test/offline-sync.property.test.ts` |
+| Replay is idempotent; a sequence gap refuses loudly, then heals in order | `test/offline-sync.property.test.ts` |
+| Conflicting registrations converge to one winner in either apply order (LWW) | `test/offline-sync.property.test.ts` |
+| Bid table rejects UPDATE/DELETE for tenant role and superuser | `test/offline-sync.property.test.ts` |
+| Exact ZPL bytes reach a real TCP:9100 listener; names can't inject ZPL | `test/zpl-badge.test.ts` |
+
 ## Running the tests
 
 Requires Node 22 and PostgreSQL 16.
