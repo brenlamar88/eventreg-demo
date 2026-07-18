@@ -8,31 +8,43 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Probe eventreg (the real product) and mine its routes
+      - name: Verify eventreg production after phases A-D + DB migration
         run: |
           UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
           BASE="https://eventreg-eosin.vercel.app"
-          echo "::group::GET $BASE/ (index)"
+
+          echo "::group::index"
           curl -sS -L --max-time 30 -A "$UA" "$BASE/" -o index.html -w "HTTP %{http_code}\n"
-          cat index.html | head -c 3000
-          echo "::endgroup::"
-          echo "::group::asset list"
           grep -oE '(src|href)="[^"]+"' index.html | sort -u
           echo "::endgroup::"
-          echo "::group::route + feature strings from JS bundles"
-          for js in $(grep -oE 'src="[^"]+\.js"' index.html | cut -d'"' -f2); do
-            case "$js" in http*) URL="$js";; *) URL="$BASE$js";; esac
-            echo "--- bundle: $URL"
-            curl -sS -L --max-time 60 -A "$UA" "$URL" -o bundle.js -w "HTTP %{http_code}, bytes: %{size_download}\n"
-            echo "-- routes (path:...)"
-            grep -oE 'path:"[^"]{1,60}"' bundle.js | sort -u | head -80
-            echo "-- createBrowserRouter/Route path= strings"
-            grep -oE '"/[a-z0-9/:_-]{2,40}"' bundle.js | sort -u | head -120
-            echo "-- supabase tables referenced (from("...")):"
-            grep -oE 'from\("[a-z_]{3,40}"\)' bundle.js | sort -u | head -60
-            echo "-- rpc calls:"
-            grep -oE 'rpc\("[a-z_]{3,50}"' bundle.js | sort -u | head -40
-            echo "-- notable feature words:"
-            grep -oE '(QR|qrcode|wallet|pkpass|badge|check.?in|kiosk|sponsor|offline|ticket|registr[a-z]*)' bundle.js -i -o | tr 'A-Z' 'a-z' | sort | uniq -c | sort -rn | head -20
-          done
+
+          echo "::group::service worker (offline shell)"
+          curl -sS -L --max-time 30 -A "$UA" "$BASE/sw.js" -w "\nHTTP %{http_code}\n" | head -c 600
+          echo "::endgroup::"
+
+          echo "::group::entry bundle contains phase-D config layer"
+          JS=$(grep -oE 'src="[^"]+\.js"' index.html | cut -d'"' -f2 | head -1)
+          case "$JS" in http*) URL="$JS";; *) URL="$BASE$JS";; esac
+          curl -sS -L --max-time 60 -A "$UA" "$URL" -o bundle.js -w "HTTP %{http_code}, bytes: %{size_download}\n"
+          echo "config markers:"
+          grep -oE 'eventreg-config-v1|/api/event-config|eventreg-door|/api/scan-batch|station=scan|EventSetup' bundle.js | sort | uniq -c
+          echo "::endgroup::"
+
+          echo "::group::GET /api/event-config (public, proves DB migration)"
+          curl -sS --max-time 30 -A "$UA" "$BASE/api/event-config" -w "\nHTTP %{http_code}\n"
+          echo "::endgroup::"
+
+          echo "::group::GET /api/ticket?token=bogus (expect 404)"
+          curl -sS --max-time 30 -A "$UA" "$BASE/api/ticket?token=bogus-probe-token" -w "\nHTTP %{http_code}\n"
+          echo "::endgroup::"
+
+          echo "::group::wallet probes (200 = configured, 503 = env not set yet)"
+          curl -sS --max-time 30 -A "$UA" "$BASE/api/wallet-pass?probe=1" -w "\nHTTP %{http_code}\n"
+          curl -sS --max-time 30 -A "$UA" "$BASE/api/google-wallet?probe=1" -w "\nHTTP %{http_code}\n"
+          echo "::endgroup::"
+
+          echo "::group::auth gates (expect 401 without organizer key)"
+          curl -sS --max-time 30 -A "$UA" -X POST -H "Content-Type: application/json" -d '{"token":"x"}' "$BASE/api/scan" -w "\nHTTP %{http_code}\n"
+          curl -sS --max-time 30 -A "$UA" -X POST -H "Content-Type: application/json" -d '{"scans":[]}' "$BASE/api/scan-batch" -w "\nHTTP %{http_code}\n"
+          curl -sS --max-time 30 -A "$UA" "$BASE/api/registrants" -w "\nHTTP %{http_code}\n"
           echo "::endgroup::"
