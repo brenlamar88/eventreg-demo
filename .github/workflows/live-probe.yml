@@ -8,55 +8,46 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Verify eventreg production after phases A-D + DB migration
+      - name: End-to-end smoke test + migration detection (phases A–L)
         run: |
           UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
           BASE="https://eventreg-eosin.vercel.app"
+          code() { curl -sS -o /tmp/body --max-time 30 -A "$UA" -w "%{http_code}" "$@"; }
 
-          echo "::group::index"
-          curl -sS -L --max-time 30 -A "$UA" "$BASE/" -o index.html -w "HTTP %{http_code}\n"
-          grep -oE '(src|href)="[^"]+"' index.html | sort -u
-          echo "::endgroup::"
+          echo "== PAGES =="
+          echo -n "marketing /?app=home : "; c=$(code "$BASE/?app=home"); echo "$c $(grep -qo 'id=\"root\"' /tmp/body && echo html-ok)"
+          echo -n "registration /        : "; c=$(code "$BASE/"); echo "$c"
+          echo -n "service worker /sw.js : "; c=$(code "$BASE/sw.js"); echo "$c $(head -c 40 /tmp/body)"
 
-          echo "::group::service worker (offline shell)"
-          curl -sS -L --max-time 30 -A "$UA" "$BASE/sw.js" -w "\nHTTP %{http_code}\n" | head -c 600
-          echo "::endgroup::"
+          echo ""
+          echo "== BUNDLE (deployed code freshness) =="
+          curl -sS -L --max-time 30 -A "$UA" "$BASE/" -o index.html
+          JS=$(grep -oE 'src="[^"]+\.js"' index.html | cut -d'"' -f2 | head -1); case "$JS" in http*) U="$JS";; *) U="$BASE$JS";; esac
+          curl -sS -L --max-time 60 -A "$UA" "$U" -o bundle.js
+          echo "markers: $(grep -oE '/api/leads|app=home|/api/members|/api/connect|/api/organizations|PlatformAdmin|Marketing' bundle.js | sort -u | tr '\n' ' ')"
 
-          echo "::group::entry bundle contains phase-D config layer"
-          JS=$(grep -oE 'src="[^"]+\.js"' index.html | cut -d'"' -f2 | head -1)
-          case "$JS" in http*) URL="$JS";; *) URL="$BASE$JS";; esac
-          curl -sS -L --max-time 60 -A "$UA" "$URL" -o bundle.js -w "HTTP %{http_code}, bytes: %{size_download}\n"
-          echo "config markers:"
-          grep -oE 'eventreg-config-v1|/api/event-config|eventreg-door|/api/scan-batch|station=scan|EventSetup' bundle.js | sort | uniq -c
-          echo "::endgroup::"
+          echo ""
+          echo "== MIGRATION DETECTION =="
+          echo -n "phase-e (event_id in config): "; c=$(code "$BASE/api/event-config?event=boil85"); grep -q '"event_id"' /tmp/body && echo "$c APPLIED" || echo "$c NOT-DETECTED"
+          echo -n "phase-h (organizations/house): "; c=$(code "$BASE/api/members?client=house"); \
+            if [ "$c" = "401" ]; then echo "$c APPLIED (table+house exist, auth gate hit)"; \
+            elif [ "$c" = "404" ]; then echo "$c NOT-APPLIED (org table/house missing)"; \
+            else echo "$c (unexpected: $(head -c 80 /tmp/body))"; fi
+          echo -n "phase-l (leads table via public POST): "; \
+            c=$(code -X POST -H "Content-Type: application/json" -d '{"email":"smoke-probe@example.com","name":"CI smoke probe","message":"automated migration check — safe to delete","source":"ci-probe"}' "$BASE/api/leads"); \
+            if [ "$c" = "200" ]; then echo "$c APPLIED (test lead inserted — delete it in Platform Admin)"; \
+            elif [ "$c" = "500" ]; then echo "$c NOT-APPLIED (leads table missing)"; \
+            else echo "$c $(head -c 80 /tmp/body)"; fi
 
-          echo "::group::GET /api/event-config (default event, proves DB migration)"
-          curl -sS --max-time 30 -A "$UA" "$BASE/api/event-config" -w "\nHTTP %{http_code}\n"
-          echo "::endgroup::"
+          echo ""
+          echo "== AUTH GATES (expect 401 without a key) =="
+          for ep in "GET /api/event-config?list=1" "GET /api/registrants" "GET /api/organizations" "GET /api/leads" "POST /api/scan" "GET /api/members?client=house"; do
+            m=${ep%% *}; p=${ep#* }; c=$(code -X "$m" -H "Content-Type: application/json" -d '{}' "$BASE$p"); echo "  $ep -> $c"
+          done
 
-          echo "::group::multi-event: GET /api/event-config?event=boil85 (200 = phase-e ran)"
-          curl -sS --max-time 30 -A "$UA" "$BASE/api/event-config?event=boil85" -w "\nHTTP %{http_code}\n"
-          echo "::endgroup::"
-
-          echo "::group::multi-event: bad slug rejected (expect 400)"
-          curl -sS --max-time 30 -A "$UA" "$BASE/api/event-config?event=BAD!!" -w "\nHTTP %{http_code}\n"
-          echo "::endgroup::"
-
-          echo "::group::multi-event: event list gated (expect 401 without key)"
-          curl -sS --max-time 30 -A "$UA" "$BASE/api/event-config?list=1" -w "\nHTTP %{http_code}\n"
-          echo "::endgroup::"
-
-          echo "::group::GET /api/ticket?token=bogus (expect 404)"
-          curl -sS --max-time 30 -A "$UA" "$BASE/api/ticket?token=bogus-probe-token" -w "\nHTTP %{http_code}\n"
-          echo "::endgroup::"
-
-          echo "::group::wallet probes (200 = configured, 503 = env not set yet)"
-          curl -sS --max-time 30 -A "$UA" "$BASE/api/wallet-pass?probe=1" -w "\nHTTP %{http_code}\n"
-          curl -sS --max-time 30 -A "$UA" "$BASE/api/google-wallet?probe=1" -w "\nHTTP %{http_code}\n"
-          echo "::endgroup::"
-
-          echo "::group::auth gates (expect 401 without organizer key)"
-          curl -sS --max-time 30 -A "$UA" -X POST -H "Content-Type: application/json" -d '{"token":"x"}' "$BASE/api/scan" -w "\nHTTP %{http_code}\n"
-          curl -sS --max-time 30 -A "$UA" -X POST -H "Content-Type: application/json" -d '{"scans":[]}' "$BASE/api/scan-batch" -w "\nHTTP %{http_code}\n"
-          curl -sS --max-time 30 -A "$UA" "$BASE/api/registrants" -w "\nHTTP %{http_code}\n"
-          echo "::endgroup::"
+          echo ""
+          echo "== EXPECTED-STATE ENDPOINTS =="
+          echo -n "ticket bogus (404): "; code "$BASE/api/ticket?token=bogus" ; echo
+          echo -n "bad event slug (400): "; code "$BASE/api/event-config?event=BAD!!" ; echo
+          echo -n "wallet apple (503 until configured): "; code "$BASE/api/wallet-pass?probe=1" ; echo
+          echo -n "connect (503 until Stripe/Connect configured, else 401): "; code "$BASE/api/connect?client=house" ; echo
