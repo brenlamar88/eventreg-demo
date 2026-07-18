@@ -30,8 +30,20 @@ jobs:
           grep -oE 'eventreg-config-v1|/api/event-config|eventreg-door|/api/scan-batch|station=scan|EventSetup' bundle.js | sort | uniq -c
           echo "::endgroup::"
 
-          echo "::group::GET /api/event-config (public, proves DB migration)"
+          echo "::group::GET /api/event-config (default event, proves DB migration)"
           curl -sS --max-time 30 -A "$UA" "$BASE/api/event-config" -w "\nHTTP %{http_code}\n"
+          echo "::endgroup::"
+
+          echo "::group::multi-event: GET /api/event-config?event=boil85 (200 = phase-e ran)"
+          curl -sS --max-time 30 -A "$UA" "$BASE/api/event-config?event=boil85" -w "\nHTTP %{http_code}\n"
+          echo "::endgroup::"
+
+          echo "::group::multi-event: bad slug rejected (expect 400)"
+          curl -sS --max-time 30 -A "$UA" "$BASE/api/event-config?event=BAD!!" -w "\nHTTP %{http_code}\n"
+          echo "::endgroup::"
+
+          echo "::group::multi-event: event list gated (expect 401 without key)"
+          curl -sS --max-time 30 -A "$UA" "$BASE/api/event-config?list=1" -w "\nHTTP %{http_code}\n"
           echo "::endgroup::"
 
           echo "::group::GET /api/ticket?token=bogus (expect 404)"
