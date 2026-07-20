@@ -25,11 +25,6 @@ jobs:
           JS=$(grep -oE 'src="[^"]+\.js"' index.html | cut -d'"' -f2 | head -1); case "$JS" in http*) U="$JS";; *) U="$BASE$JS";; esac
           curl -sS -L --max-time 60 -A "$UA" "$U" -o bundle.js
           echo "markers: $(grep -oE '/api/leads|app=home|/api/members|/api/connect|/api/organizations|PlatformAdmin|Marketing' bundle.js | sort -u | tr '\n' ' ')"
-          # Which Supabase project does the deployed FRONTEND target? (reveals project mismatch)
-          for f in bundle.js index.html; do curl -sS -L --max-time 60 -A "$UA" "$U" -o /dev/null 2>/dev/null; done
-          echo "frontend supabase ref: $(grep -oE 'https://[a-z0-9]{16,}\.supabase\.co' bundle.js | sort -u | tr '\n' ' ')"
-          # Also scan every JS chunk referenced by index.html (authClient may be split out)
-          for j in $(grep -oE 'src="[^"]+\.js"' index.html | cut -d'"' -f2); do case "$j" in http*) CU="$j";; *) CU="$BASE$j";; esac; curl -sS -L --max-time 60 -A "$UA" "$CU" -o chunk.js 2>/dev/null; grep -oE 'https://[a-z0-9]{16,}\.supabase\.co' chunk.js; done | sort -u | tr '\n' ' ' | sed 's/^/all chunks supabase refs: /'; echo
 
           echo ""
           echo "== MIGRATION DETECTION =="
